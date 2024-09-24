@@ -11,6 +11,7 @@ pub mod redis;
 
 use std::time::Duration;
 
+use cookie::Expiration;
 use rand::{rngs::OsRng, Rng};
 use rocket::{
 	fairing::{Fairing, Info, Kind},
@@ -21,6 +22,7 @@ use rocket::{
 	Build, Request, Response, Rocket, State,
 };
 use thiserror::Error;
+use time::OffsetDateTime;
 
 fn new_id(length: usize) -> String {
 	OsRng
@@ -48,6 +50,8 @@ pub trait Store: Send + Sync {
 	async fn touch(&self, id: &str, duration: Duration) -> SessionResult<()>;
 	/// Remove the value from the store.
 	async fn remove(&self, id: &str) -> SessionResult<()>;
+	/// Report when this session expires
+	async fn expires(&self, id: &str) -> Option<OffsetDateTime>;
 }
 
 /// String representing the ID.
@@ -220,6 +224,12 @@ where
 			let store: &State<SessionStore<T>> = request.guard().await.expect("");
 			let name = store.name.as_str();
 			let cookie = &store.cookie;
+			let expires = store
+				.store
+				.expires(&session.0)
+				.await
+				.map(|expires| Expiration::DateTime(expires))
+				.unwrap_or(Expiration::Session);
 			response.adjoin_header::<Cookie>(
 				Cookie::build((name, session.0.as_str()))
 					.http_only(cookie.http_only)
@@ -232,6 +242,7 @@ where
 					)
 					.same_site(cookie.same_site.unwrap_or(SameSite::Lax))
 					.secure(cookie.secure)
+					.expires(expires)
 					.into(),
 			)
 		}

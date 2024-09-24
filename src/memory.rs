@@ -4,23 +4,12 @@
 //! to be used for testing and development. It is not optimized for production
 //! and thus you should use another store to use it in the real world.
 
-use std::{
-	collections::HashMap,
-	time::{
-		Duration,
-		Instant,
-	},
-};
+use std::{collections::HashMap, time::Duration};
 
-use rocket::tokio::sync::{
-	Mutex,
-	RwLock,
-};
+use rocket::tokio::sync::{Mutex, RwLock};
+use time::OffsetDateTime;
 
-use crate::{
-	SessionResult,
-	Store,
-};
+use crate::{SessionResult, Store};
 
 /// An in memory implementation of a session store using hashmaps.
 /// Do note that this implementation is just for testing purposes,
@@ -31,7 +20,7 @@ pub struct MemoryStore<T> {
 
 struct MemoryStoreFrame<T> {
 	value: T,
-	expiry: Instant,
+	expiry: OffsetDateTime,
 }
 
 impl<T> Default for MemoryStore<T> {
@@ -60,11 +49,7 @@ where
 		let lock = self.map.read().await;
 		if let Some(frame) = lock.get(id) {
 			let frame_lock = frame.lock().await;
-			if frame_lock
-				.expiry
-				.checked_duration_since(Instant::now())
-				.is_some()
-			{
+			if frame_lock.expiry >= OffsetDateTime::now_utc() {
 				return Ok(Some(frame_lock.value.clone()));
 			};
 		};
@@ -75,7 +60,7 @@ where
 		let mut lock = self.map.write().await;
 		let frame = MemoryStoreFrame {
 			value,
-			expiry: Instant::now() + expiry,
+			expiry: OffsetDateTime::now_utc() + expiry,
 		};
 		lock.insert(id.into(), Mutex::new(frame));
 
@@ -86,7 +71,7 @@ where
 		let lock = self.map.read().await;
 		if let Some(frame) = lock.get(id) {
 			let mut frame_lock = frame.lock().await;
-			frame_lock.expiry = Instant::now() + duration;
+			frame_lock.expiry = OffsetDateTime::now_utc() + duration;
 		};
 		Ok(())
 	}
@@ -96,5 +81,12 @@ where
 		lock.remove(id);
 
 		Ok(())
+	}
+
+	async fn expires(&self, id: &str) -> Option<OffsetDateTime> {
+		let lock = self.map.read().await;
+		let frame = lock.get(id)?;
+		let frame_lock = frame.lock().await;
+		Some(frame_lock.expiry)
 	}
 }
